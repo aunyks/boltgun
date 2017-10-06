@@ -1,3 +1,7 @@
+# Project-specific files
+.ammo
+gun.db
+
 # Binaries for programs and plugins
 *.exe
 *.dll
