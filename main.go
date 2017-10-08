@@ -81,7 +81,6 @@ func getAuthToken(db *bolt.DB) func(http.ResponseWriter, *http.Request) {
 			http.Error(w, "Unable to read request body!", http.StatusBadRequest)
 			return
 		}
-		w.WriteHeader(http.StatusOK)
 		// Check to make sure that the body
 		// can be read as an authclient
 		var authClient AuthClient
@@ -115,6 +114,7 @@ func getAuthToken(db *bolt.DB) func(http.ResponseWriter, *http.Request) {
 					if marshalErr != nil {
 						http.Error(w, "{ \"error\": \"Unable to provide response!\" }", http.StatusInternalServerError)
 					}
+					w.WriteHeader(http.StatusOK)
 					fmt.Fprintln(w, string(response))
 				}
 			}
@@ -137,20 +137,144 @@ func getAuthToken(db *bolt.DB) func(http.ResponseWriter, *http.Request) {
 
 func updateDB(db *bolt.DB) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// TODO
-		// Check to see if bucket exists. If not, error
-		// Update or create key in bucket
-		// Return success
-		// cursor.delete() see authenticate
+		requestIsAuthed := false
+		vars := mux.Vars(r)
+		bucketName := vars["bucket"]
+		body, bodyReadErr := ioutil.ReadAll(r.Body)
+		if bodyReadErr != nil {
+			log.Printf("Error reading request body: %v", bodyReadErr)
+			http.Error(w, "Unable to read request body!", http.StatusBadRequest)
+			return
+		}
+		// Check to make sure that the body
+		// can be read as a struct
+		var updateRequest struct {
+			Key   string `json:"key"`
+			Value string `json:"value"`
+			Token string `json:"token"`
+		}
+		unmarshalErr := json.Unmarshal(body, &updateRequest)
+		if unmarshalErr != nil {
+			log.Printf("Error marshaling request body: %v", unmarshalErr)
+			http.Error(w, "Invalid request body!", http.StatusBadRequest)
+			return
+		}
+		db.Update(func(tx *bolt.Tx) error {
+			// Open the given bucket
+			b, bucketCreateErr := tx.CreateBucketIfNotExists([]byte(bucketName))
+			if bucketCreateErr != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte("Unable to create or open requested bucket!"))
+			}
+			c := tx.Bucket([]byte(AUTHED_CLIENTS_BUCKET)).Cursor()
+			for k, v := c.First(); k != nil && requestIsAuthed == false; k, v = c.Next() {
+				// if token is valid then proceed
+				// if not, stop there
+				if b64.StdEncoding.EncodeToString([]byte(v)) == updateRequest.Token {
+					requestIsAuthed = true
+				}
+			}
+			if requestIsAuthed {
+				txionErr := b.Put([]byte(updateRequest.Key), []byte(updateRequest.Value))
+				if txionErr != nil {
+					w.WriteHeader(http.StatusOK)
+				} else {
+					w.WriteHeader(http.StatusInternalServerError)
+				}
+				successResponse := struct {
+					Success bool `json:"success"`
+				}{
+					true,
+				}
+				response, marshalErr := json.Marshal(successResponse)
+				if marshalErr != nil {
+					http.Error(w, "{ \"error\": \"Unable to provide response!\" }", http.StatusInternalServerError)
+				}
+				fmt.Fprintln(w, string(response))
+				return txionErr
+			}
+			errorResponse := struct {
+				ErrorMsg string `json:"error"`
+			}{
+				"Invalid request token!",
+			}
+			response, marshalErr := json.Marshal(errorResponse)
+			if marshalErr != nil {
+				http.Error(w, "{ \"error\": \"Unable to provide response!\" }", http.StatusInternalServerError)
+			}
+			fmt.Fprintln(w, string(response))
+			return fmt.Errorf("Unable to complete response")
+		})
 	}
 }
 
 func retrieveDB(db *bolt.DB) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// TODO
-		// Check to see if bucket exists. If not, error
-		// Access key in bucket
-		// Return as JSON
+		requestIsAuthed := false
+		vars := mux.Vars(r)
+		bucketName := vars["bucket"]
+		body, bodyReadErr := ioutil.ReadAll(r.Body)
+		if bodyReadErr != nil {
+			log.Printf("Error reading request body: %v", bodyReadErr)
+			http.Error(w, "Unable to read request body!", http.StatusBadRequest)
+			return
+		}
+		// Check to make sure that the body
+		// can be read as a struct
+		var retrieveRequest struct {
+			Key   string `json:"key"`
+			Token string `json:"token"`
+		}
+		unmarshalErr := json.Unmarshal(body, &retrieveRequest)
+		if unmarshalErr != nil {
+			log.Printf("Error marshaling request body: %v", unmarshalErr)
+			http.Error(w, "Invalid request body!", http.StatusBadRequest)
+			return
+		}
+		// Check to see if bucket exists
+		db.View(func(tx *bolt.Tx) error {
+			// Open the given bucket
+			b := tx.Bucket([]byte(bucketName))
+			c := tx.Bucket([]byte(AUTHED_CLIENTS_BUCKET)).Cursor()
+			for k, v := c.First(); k != nil && requestIsAuthed == false; k, v = c.Next() {
+				// if token is valid then proceed
+				// if not, stop there
+				if b64.StdEncoding.EncodeToString([]byte(v)) == retrieveRequest.Token {
+					requestIsAuthed = true
+				}
+			}
+			if requestIsAuthed {
+				v := b.Get([]byte(retrieveRequest.Key))
+				if v != nil {
+					w.WriteHeader(http.StatusOK)
+				} else {
+					w.WriteHeader(http.StatusBadRequest)
+				}
+				successResponse := struct {
+					Value string `json:"value"`
+				}{
+					string(v),
+				}
+				response, marshalErr := json.Marshal(successResponse)
+				if marshalErr != nil {
+					http.Error(w, "{ \"error\": \"Unable to provide response!\" }", http.StatusInternalServerError)
+				}
+				fmt.Fprintln(w, string(response))
+				return nil
+			}
+			errorResponse := struct {
+				ErrorMsg string `json:"error"`
+			}{
+				"Invalid request token!",
+			}
+			response, marshalErr := json.Marshal(errorResponse)
+			if marshalErr != nil {
+				http.Error(w, "{ \"error\": \"Unable to provide response!\" }", http.StatusInternalServerError)
+			}
+			fmt.Fprintln(w, string(response))
+			return fmt.Errorf("Unable to complete response")
+		})
 	}
 }
 
@@ -194,7 +318,7 @@ func Init(ammoFilePath string, dbFilePath string) *Gun {
 	router.HandleFunc("/{bucket}/update", updateDB(db)).
 		Methods("POST")
 	router.HandleFunc("/{bucket}/retrieve", retrieveDB(db)).
-		Methods("GET")
+		Methods("POST")
 	// Init Boltgun instance
 	return &Gun{
 		ammoFilePath,
