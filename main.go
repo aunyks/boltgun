@@ -213,7 +213,6 @@ func updateDB(db *bolt.DB) func(http.ResponseWriter, *http.Request) {
 
 func retrieveDB(db *bolt.DB) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// TODO
 		requestIsAuthed := false
 		body, bodyReadErr := ioutil.ReadAll(r.Body)
 		if bodyReadErr != nil {
@@ -234,10 +233,10 @@ func retrieveDB(db *bolt.DB) func(http.ResponseWriter, *http.Request) {
 			http.Error(w, "{ \"error\": \"Invalid request body!\" }", http.StatusBadRequest)
 			return
 		}
-		// Check to see if bucket exists
 		db.View(func(tx *bolt.Tx) error {
 			// Open the given bucket
 			b := tx.Bucket([]byte(retrieveRequest.Bucket))
+			// Check to see if bucket exists
 			if b == nil {
 				http.Error(w, "{ \"error\": \"Bucket doesn't exist!\" }", http.StatusBadRequest)
 				return fmt.Errorf("Client tried to access non-existent bucket: %s", retrieveRequest.Bucket)
@@ -252,11 +251,12 @@ func retrieveDB(db *bolt.DB) func(http.ResponseWriter, *http.Request) {
 			}
 			if requestIsAuthed {
 				v := b.Get([]byte(retrieveRequest.Key))
-				if v != nil {
-					w.WriteHeader(http.StatusOK)
-				} else {
+				if v == nil {
 					w.WriteHeader(http.StatusBadRequest)
+					http.Error(w, "{ \"error\": \"Error retrieving requested key!\" }", http.StatusBadRequest)
+					return fmt.Errorf("Client tried to delete invalid key: %s", retrieveRequest.Key)
 				}
+				w.WriteHeader(http.StatusOK)
 				successResponse := struct {
 					Value string `json:"value"`
 				}{
@@ -265,6 +265,79 @@ func retrieveDB(db *bolt.DB) func(http.ResponseWriter, *http.Request) {
 				response, marshalErr := json.Marshal(successResponse)
 				if marshalErr != nil {
 					http.Error(w, "{ \"error\": \"Unable to provide response!\" }", http.StatusInternalServerError)
+				}
+				fmt.Fprintln(w, string(response))
+				return nil
+			}
+			errorResponse := struct {
+				ErrorMsg string `json:"error"`
+			}{
+				"Invalid request token!",
+			}
+			response, marshalErr := json.Marshal(errorResponse)
+			if marshalErr != nil {
+				http.Error(w, "{ \"error\": \"Unable to provide response!\" }", http.StatusInternalServerError)
+			}
+			fmt.Fprintln(w, string(response))
+			return fmt.Errorf("Unable to complete response")
+		})
+	}
+}
+
+func removeDB(db *bolt.DB) func(http.ResponseWriter, *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		requestIsAuthed := false
+		body, bodyReadErr := ioutil.ReadAll(r.Body)
+		if bodyReadErr != nil {
+			log.Printf("Error reading request body: %v", bodyReadErr)
+			http.Error(w, "{ \"error\": \"Unable to read request body!\"", http.StatusBadRequest)
+			return
+		}
+		// Check to make sure that the body
+		// can be read as a struct
+		var removeRequest struct {
+			Key    string `json:"key"`
+			Bucket string `json:"bucket"`
+			Token  string `json:"token"`
+		}
+		unmarshalErr := json.Unmarshal(body, &removeRequest)
+		if unmarshalErr != nil || removeRequest.Key == "" {
+			log.Printf("Error marshaling request body: %v", unmarshalErr)
+			http.Error(w, "{ \"error\": \"Invalid request body!\" }", http.StatusBadRequest)
+			return
+		}
+		db.Update(func(tx *bolt.Tx) error {
+			// Open the given bucket
+			b := tx.Bucket([]byte(removeRequest.Bucket))
+			// Check to see if bucket exists
+			if b == nil {
+				http.Error(w, "{ \"error\": \"Bucket doesn't exist!\" }", http.StatusBadRequest)
+				return fmt.Errorf("Client tried to access non-existent bucket: %s", removeRequest.Bucket)
+			}
+			c := tx.Bucket([]byte(AUTHED_CLIENTS_BUCKET)).Cursor()
+			for k, v := c.First(); k != nil && requestIsAuthed == false; k, v = c.Next() {
+				// if token is valid then proceed
+				// if not, stop there
+				if b64.StdEncoding.EncodeToString([]byte(v)) == removeRequest.Token {
+					requestIsAuthed = true
+				}
+			}
+			if requestIsAuthed {
+				deleteErr := b.Delete([]byte(removeRequest.Key))
+				if deleteErr != nil {
+					w.WriteHeader(http.StatusBadRequest)
+					http.Error(w, "{ \"error\": \"Error deleting requested key!\" }", http.StatusBadRequest)
+					return fmt.Errorf("Client tried to delete invalid key")
+				}
+				w.WriteHeader(http.StatusOK)
+				successResponse := struct {
+					Success bool `json:"success"`
+				}{
+					true,
+				}
+				response, marshalErr := json.Marshal(successResponse)
+				if marshalErr != nil {
+					http.Error(w, "{ \"error\": \"Unable to provide response!\" }", http.StatusBadRequest)
 				}
 				fmt.Fprintln(w, string(response))
 				return nil
@@ -325,6 +398,8 @@ func Init(ammoFilePath string, dbFilePath string) *Gun {
 	router.HandleFunc("/update", updateDB(db)).
 		Methods("POST")
 	router.HandleFunc("/retrieve", retrieveDB(db)).
+		Methods("POST")
+	router.HandleFunc("/remove", removeDB(db)).
 		Methods("POST")
 	// Init Boltgun instance
 	return &Gun{
