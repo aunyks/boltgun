@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"crypto/rand"
 	b64 "encoding/base64"
 	"encoding/json"
@@ -9,8 +10,10 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
 	"reflect"
 	"strconv"
+	"time"
 
 	"github.com/boltdb/bolt"
 	"github.com/gorilla/mux"
@@ -278,6 +281,7 @@ func retrieveDB(db *bolt.DB) func(http.ResponseWriter, *http.Request) {
 	}
 }
 
+// Init configures and initializes a BoltGun instance to be launched at a later time
 func Init(ammoFilePath string, dbFilePath string) *Gun {
 	// Open ammo file from directory
 	ammoFileContents := openTextFile(ammoFilePath)
@@ -328,8 +332,41 @@ func Init(ammoFilePath string, dbFilePath string) *Gun {
 	}
 }
 
-func (g *Gun) Fire(port int64) {
+// Fire launches the BoltGun instance. It binds BoltGun to the given port and backs up the database to the given file location
+func (g *Gun) Fire(port int64, backupFileLoc string) {
 	actualPort := ":" + strconv.FormatInt(port, 10)
+	ticker := time.NewTicker(2 * 60 * time.Second)
+	quit := make(chan struct{})
+	defer close(quit)
+	if backupFileLoc != "" {
+		go func() {
+			for {
+				select {
+				case <-ticker.C:
+					g.bolt.View(func(tx *bolt.Tx) error {
+						var file *os.File
+						var openErr error
+						if _, err := os.Stat(backupFileLoc); !os.IsNotExist(err) {
+							file, openErr = os.Open(backupFileLoc)
+						} else {
+							file, openErr = os.Create(backupFileLoc)
+						}
+						w := bufio.NewWriter(file)
+						fmt.Println("Backing up DB")
+						_, writeErr := tx.WriteTo(w)
+						if openErr != nil {
+							fmt.Println("Error opening backup DB file")
+							return openErr
+						}
+						return writeErr
+					})
+				case <-quit:
+					ticker.Stop()
+					return
+				}
+			}
+		}()
+	}
 	http.ListenAndServe(actualPort, g.router)
 	defer g.bolt.Close()
 }

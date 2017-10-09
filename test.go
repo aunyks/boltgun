@@ -2,5 +2,5 @@ package main
 
 func main() {
 	gun := Init("./.ammo", "./gun.db")
-	gun.Fire(8080)
+	gun.Fire(8080, "./rifle.db")
 }
