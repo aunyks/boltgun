@@ -141,8 +141,6 @@ func getAuthToken(db *bolt.DB) func(http.ResponseWriter, *http.Request) {
 func updateDB(db *bolt.DB) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		requestIsAuthed := false
-		vars := mux.Vars(r)
-		bucketName := vars["bucket"]
 		body, bodyReadErr := ioutil.ReadAll(r.Body)
 		if bodyReadErr != nil {
 			log.Printf("Error reading request body: %v", bodyReadErr)
@@ -152,22 +150,24 @@ func updateDB(db *bolt.DB) func(http.ResponseWriter, *http.Request) {
 		// Check to make sure that the body
 		// can be read as a struct
 		var updateRequest struct {
-			Key   string `json:"key"`
-			Value string `json:"value"`
-			Token string `json:"token"`
+			Key    string `json:"key"`
+			Bucket string `json:"bucket"`
+			Value  string `json:"value"`
+			Token  string `json:"token"`
 		}
 		unmarshalErr := json.Unmarshal(body, &updateRequest)
-		if unmarshalErr != nil {
+		if unmarshalErr != nil || updateRequest.Key == "" || updateRequest.Value == "" {
 			log.Printf("Error marshaling request body: %v", unmarshalErr)
-			http.Error(w, "Invalid request body!", http.StatusBadRequest)
+			http.Error(w, "{ \"error\": \"Invalid request body!\" }", http.StatusBadRequest)
 			return
 		}
 		db.Update(func(tx *bolt.Tx) error {
 			// Open the given bucket
-			b, bucketCreateErr := tx.CreateBucketIfNotExists([]byte(bucketName))
+			b, bucketCreateErr := tx.CreateBucketIfNotExists([]byte(updateRequest.Bucket))
 			if bucketCreateErr != nil {
 				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte("Unable to create or open requested bucket!"))
+				http.Error(w, "{ \"error\": \"Unable to create or open requested bucket!\" }", http.StatusBadRequest)
+				return fmt.Errorf("Unable to create or open requested bucket")
 			}
 			c := tx.Bucket([]byte(AUTHED_CLIENTS_BUCKET)).Cursor()
 			for k, v := c.First(); k != nil && requestIsAuthed == false; k, v = c.Next() {
@@ -215,30 +215,33 @@ func retrieveDB(db *bolt.DB) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// TODO
 		requestIsAuthed := false
-		vars := mux.Vars(r)
-		bucketName := vars["bucket"]
 		body, bodyReadErr := ioutil.ReadAll(r.Body)
 		if bodyReadErr != nil {
 			log.Printf("Error reading request body: %v", bodyReadErr)
-			http.Error(w, "Unable to read request body!", http.StatusBadRequest)
+			http.Error(w, "{ \"error\": \"Unable to read request body!\"", http.StatusBadRequest)
 			return
 		}
 		// Check to make sure that the body
 		// can be read as a struct
 		var retrieveRequest struct {
-			Key   string `json:"key"`
-			Token string `json:"token"`
+			Key    string `json:"key"`
+			Bucket string `json:"bucket"`
+			Token  string `json:"token"`
 		}
 		unmarshalErr := json.Unmarshal(body, &retrieveRequest)
-		if unmarshalErr != nil {
+		if unmarshalErr != nil || retrieveRequest.Key == "" {
 			log.Printf("Error marshaling request body: %v", unmarshalErr)
-			http.Error(w, "Invalid request body!", http.StatusBadRequest)
+			http.Error(w, "{ \"error\": \"Invalid request body!\" }", http.StatusBadRequest)
 			return
 		}
 		// Check to see if bucket exists
 		db.View(func(tx *bolt.Tx) error {
 			// Open the given bucket
-			b := tx.Bucket([]byte(bucketName))
+			b := tx.Bucket([]byte(retrieveRequest.Bucket))
+			if b == nil {
+				http.Error(w, "{ \"error\": \"Bucket doesn't exist!\" }", http.StatusBadRequest)
+				return fmt.Errorf("Client tried to access non-existent bucket: %s", retrieveRequest.Bucket)
+			}
 			c := tx.Bucket([]byte(AUTHED_CLIENTS_BUCKET)).Cursor()
 			for k, v := c.First(); k != nil && requestIsAuthed == false; k, v = c.Next() {
 				// if token is valid then proceed
@@ -319,9 +322,9 @@ func Init(ammoFilePath string, dbFilePath string) *Gun {
 	router := mux.NewRouter()
 	router.HandleFunc("/authenticate", getAuthToken(db)).
 		Methods("POST")
-	router.HandleFunc("/{bucket}/update", updateDB(db)).
+	router.HandleFunc("/update", updateDB(db)).
 		Methods("POST")
-	router.HandleFunc("/{bucket}/retrieve", retrieveDB(db)).
+	router.HandleFunc("/retrieve", retrieveDB(db)).
 		Methods("POST")
 	// Init Boltgun instance
 	return &Gun{
