@@ -1,7 +1,7 @@
 # BoltGun
-## An HTTP interface for communicating with a BoltDB instance.
+**An HTTP interface for communicating with a BoltDB instance.**
 BoltDB is a key/value store, and BoltGun lets you interact with it via HTTP. 
-![BoltGun]()
+![BoltGun](https://raw.githubusercontent.com/aunyks/boltgun/master/pistol.png)
 
 ### How It Works
 The common workflow for interacting with BoltGun is as follows.
