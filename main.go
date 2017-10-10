@@ -357,7 +357,7 @@ func removeDB(db *bolt.DB) func(http.ResponseWriter, *http.Request) {
 	}
 }
 
-// Init configures and initializes a BoltGun instance to be launched at a later time
+// Init configures and initializes a BoltGun instance to be launched at a later time.
 func Init(ammoFilePath string, dbFilePath string) *Gun {
 	// Open ammo file from directory
 	ammoFileContents := openTextFile(ammoFilePath)
