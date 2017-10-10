@@ -1,7 +1,7 @@
 # BoltGun
 **An HTTP interface for communicating with a BoltDB instance.**  
 BoltDB is a key/value store, and BoltGun lets you interact with it via HTTP.  
- 
+
 ![BoltGun](https://raw.githubusercontent.com/aunyks/boltgun/master/pistol.png)
 
 ### How It Works
@@ -44,7 +44,8 @@ gun.Fire(8080, "./rifle.db")
 ### Usage
 Let's add a new key-value pair to a bucket.  
 
-1. Send a POST request to the `/authenticate` route consisting of the username and password of a client that you'd like to authenticate (accepted clients can be found in the `.ammo` file). You'll receive back either an error response or an auth token to be used in subsequent requests.
+1. Send a POST request to the `/authenticate` route consisting of the username and password of a client that you'd like to authenticate (accepted clients can be found in the `.ammo` file). You'll receive back either an error response or an auth token to be used in subsequent requests.  
+*Note: You only have to authenticate a client when an auth token is invalid or on first startup of the server.*  
 **Send**
 ```json
 {
