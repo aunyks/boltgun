@@ -59,7 +59,7 @@ Let's add a new key-value pair to a bucket.
     "token": "sTeNSXL2yqGBQaqO1Cpx8S5Oq/xhk36/fLAqVZZaHok="
 }
 ```
-2. Send a POST request to the `/update` route consisting of the auth token, the bucket in which to store the key-value pair, the key name, and a string value. You'll receive back either an error response or a success response.
+2. Send a POST request to the `/update` route consisting of the auth token, the bucket in which to store the key-value pair, the key name, and a string value. You'll receive back either an error response or a success response.  
 **Send**
 ```json
 {
